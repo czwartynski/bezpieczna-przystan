@@ -156,35 +156,31 @@ class _PrzystanState extends State<Przystan> {
   }
 
   Future<void> _addEntry([Recording? recording]) async {
-    final input = TextEditingController();
-    String? value;
-    try {
-      value = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(recording == null ? 'Nowy wpis' : 'Wpis z nagraniem'),
-          content: TextField(
-            controller: input,
-            maxLines: 4,
-            decoration: const InputDecoration(labelText: 'Treść wpisu'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Anuluj'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, input.text.trim()),
-              child: const Text('Zapisz'),
-            ),
-          ],
+    var input = '';
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(recording == null ? 'Nowy wpis' : 'Wpis z nagraniem'),
+        content: TextField(
+          onChanged: (value) => input = value,
+          maxLines: 4,
+          decoration: const InputDecoration(labelText: 'Treść wpisu'),
         ),
-      );
-    } finally {
-      input.dispose();
-    }
-    if (value == null || (value.isEmpty && recording == null) || !mounted)
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, input.trim()),
+            child: const Text('Zapisz'),
+          ),
+        ],
+      ),
+    );
+    if (value == null || (value.isEmpty && recording == null) || !mounted) {
       return;
+    }
     final entry = <String, dynamic>{
       'text': value,
       'created': DateTime.now().millisecondsSinceEpoch,
