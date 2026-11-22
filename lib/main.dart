@@ -44,6 +44,39 @@ const _modules = [
   ('PIN i ustawienia prywatności', Icons.lock_outline),
 ];
 
+const _planSteps = [
+  (
+    id: 'assessment',
+    title: 'Oceń swoje bezpieczeństwo',
+    question: 'Po czym poznasz, że sytuacja staje się niebezpieczna?',
+  ),
+  (
+    id: 'contacts',
+    title: 'Wybierz zaufane osoby',
+    question: 'Z kim możesz się skontaktować i w jaki sposób?',
+  ),
+  (
+    id: 'documents',
+    title: 'Przygotuj ważne dokumenty',
+    question: 'Które dokumenty chcesz mieć pod ręką i gdzie są?',
+  ),
+  (
+    id: 'essentials',
+    title: 'Zaplanuj niezbędne rzeczy',
+    question: 'Co chcesz mieć przy sobie?',
+  ),
+  (
+    id: 'destination',
+    title: 'Wybierz bezpieczne miejsce',
+    question: 'Dokąd możesz się udać i jak możesz tam dotrzeć?',
+  ),
+  (
+    id: 'help',
+    title: 'Zaplanuj wezwanie pomocy',
+    question: 'Z kim lub z jaką instytucją możesz się skontaktować?',
+  ),
+];
+
 class Przystan extends StatefulWidget {
   const Przystan({super.key});
 
@@ -53,9 +86,11 @@ class Przystan extends StatefulWidget {
 
 class _PrzystanState extends State<Przystan> {
   final _audio = Audio();
-  final _plan = TextEditingController();
   final _neutral = TextEditingController();
-  String _savedPlan = '';
+  String _legacyPlan = '';
+  Map<String, String> _planAnswers = {};
+  Set<String> _completedSteps = {};
+  bool _usingPlan = false;
   List<Map<String, dynamic>> _entries = [];
   List<Recording> _recordings = [];
   int? _started;
@@ -78,7 +113,6 @@ class _PrzystanState extends State<Przystan> {
   @override
   void dispose() {
     _timer.cancel();
-    _plan.dispose();
     _neutral.dispose();
     super.dispose();
   }
@@ -90,8 +124,18 @@ class _PrzystanState extends State<Przystan> {
       if (raw != null) {
         final saved = jsonDecode(raw) as Map<String, dynamic>;
         _entries = (saved['entries'] as List).cast<Map<String, dynamic>>();
-        _savedPlan = saved['plan'] as String;
-        _plan.text = _savedPlan;
+        _legacyPlan = saved['plan'] as String? ?? '';
+        final answers =
+            (saved['planAnswers'] as Map?)?.cast<String, String>() ?? {};
+        _planAnswers = {
+          for (final step in _planSteps)
+            if (answers[step.id]?.trim().isNotEmpty ?? false)
+              step.id: answers[step.id]!,
+        };
+        _completedSteps = ((saved['completedSteps'] as List?) ?? [])
+            .whereType<String>()
+            .where(_planAnswers.containsKey)
+            .toSet();
       }
       setState(() => _loaded = true);
     } catch (_) {
@@ -146,13 +190,183 @@ class _PrzystanState extends State<Przystan> {
     }
   }
 
-  Future<void> _save({List<Map<String, dynamic>>? entries}) async {
-    final plan = entries == null ? _plan.text : _savedPlan;
+  Future<void> _save({
+    List<Map<String, dynamic>>? entries,
+    Map<String, String>? answers,
+    Set<String>? completed,
+  }) async {
     await _audio.save(
-      jsonEncode({'entries': entries ?? _entries, 'plan': plan}),
+      jsonEncode({
+        'entries': entries ?? _entries,
+        'plan': _legacyPlan,
+        'planAnswers': answers ?? _planAnswers,
+        'completedSteps': (completed ?? _completedSteps).toList(),
+      }),
     );
-    _savedPlan = plan;
-    if (mounted && entries != null) setState(() => _entries = entries);
+    if (!mounted) return;
+    setState(() {
+      _entries = entries ?? _entries;
+      _planAnswers = answers ?? _planAnswers;
+      _completedSteps = completed ?? _completedSteps;
+    });
+  }
+
+  Future<void> _editPlanStep(int index) async {
+    final step = _planSteps[index];
+    var input = _planAnswers[step.id] ?? '';
+    final answer = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(step.title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(step.question),
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: input,
+              onChanged: (value) => input = value,
+              minLines: 3,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                labelText: 'Moja odpowiedź',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Zamknij'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, input.trim()),
+            child: const Text('Zapisz krok'),
+          ),
+        ],
+      ),
+    );
+    if (answer == null || !mounted || answer == _planAnswers[step.id]) return;
+    final answers = {..._planAnswers};
+    if (answer.isEmpty) {
+      answers.remove(step.id);
+    } else {
+      answers[step.id] = answer;
+    }
+    await _run(
+      () => _save(
+        answers: answers,
+        completed: {..._completedSteps}..remove(step.id),
+      ),
+    );
+  }
+
+  List<Widget> _safetyPlan() {
+    final ready = _loaded && !_busy;
+    final next = _planSteps.indexWhere(
+      (step) => !_planAnswers.containsKey(step.id),
+    );
+    return [
+      _card(
+        'Twój indywidualny plan bezpieczeństwa',
+        _usingPlan
+            ? 'Wybierz czynności, które pasują do Twojej sytuacji.'
+            : 'Uzupełnij wybrane kroki we własnym tempie.',
+        icon: Icons.shield_outlined,
+      ),
+      const SizedBox(height: 12),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('Przygotuj plan')),
+            ButtonSegment(value: true, label: Text('Otwórz plan')),
+          ],
+          selected: {_usingPlan},
+          onSelectionChanged: ready
+              ? (selection) => setState(() => _usingPlan = selection.single)
+              : null,
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (!_usingPlan) ...[
+        Text('Uzupełniono ${_planAnswers.length} z ${_planSteps.length}'),
+        const SizedBox(height: 6),
+        LinearProgressIndicator(
+          value: _planAnswers.length / _planSteps.length,
+          semanticsLabel: 'Uzupełnione kroki planu',
+        ),
+        const SizedBox(height: 8),
+        for (final (index, step) in _planSteps.indexed)
+          Card(
+            child: ListTile(
+              enabled: ready,
+              leading: _planAnswers.containsKey(step.id)
+                  ? const Icon(
+                      Icons.check_circle,
+                      color: Color(0xff28764c),
+                      semanticLabel: 'Uzupełniono',
+                    )
+                  : const Icon(
+                      Icons.radio_button_unchecked,
+                      semanticLabel: 'Do uzupełnienia',
+                    ),
+              title: Text(step.title),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: ready ? () => _editPlanStep(index) : null,
+            ),
+          ),
+        if (next >= 0)
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton(
+              onPressed: ready ? () => _editPlanStep(next) : null,
+              child: const Text('Dalej'),
+            ),
+          ),
+      ] else ...[
+        if (_planAnswers.isEmpty)
+          const Text(
+            'Uzupełnij przynajmniej jeden krok, aby dodać go do checklisty.',
+          ),
+        if (_planAnswers.isNotEmpty)
+          Text('Wykonano ${_completedSteps.length} z ${_planAnswers.length}'),
+        for (final step in _planSteps)
+          if (_planAnswers.containsKey(step.id))
+            Card(
+              child: CheckboxListTile(
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(step.title),
+                subtitle: Text(_planAnswers[step.id]!),
+                value: _completedSteps.contains(step.id),
+                onChanged: ready
+                    ? (checked) {
+                        final completed = {..._completedSteps};
+                        if (checked == true) {
+                          completed.add(step.id);
+                        } else {
+                          completed.remove(step.id);
+                        }
+                        _run(() => _save(completed: completed));
+                      }
+                    : null,
+              ),
+            ),
+        if (_completedSteps.isNotEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: ready ? () => _run(() => _save(completed: {})) : null,
+              child: const Text('Wyzeruj odhaczenia'),
+            ),
+          ),
+      ],
+      if (_legacyPlan.trim().isNotEmpty)
+        _card('Poprzednie notatki', _legacyPlan),
+    ];
   }
 
   Future<void> _addEntry([Recording? recording]) async {
@@ -445,36 +659,7 @@ class _PrzystanState extends State<Przystan> {
       ),
     ],
     2 => _journal(),
-    3 => [
-      _card(
-        'Przygotuj własny plan',
-        'Zapisz bezpieczne miejsce, sposób dotarcia tam oraz osoby, do których możesz się zwrócić.',
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _plan,
-        enabled: _loaded && !_busy,
-        minLines: 5,
-        maxLines: 12,
-        decoration: const InputDecoration(
-          labelText: 'Mój plan',
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 12),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: FilledButton(
-          onPressed: !_loaded || _busy
-              ? null
-              : () => _run(() async {
-                  await _save();
-                  _show('Plan został zapisany.');
-                }),
-          child: const Text('Zapisz plan'),
-        ),
-      ),
-    ],
+    3 => _safetyPlan(),
     4 => _recorder(),
     5 => [
       _contact(
