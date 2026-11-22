@@ -56,6 +56,11 @@ class MainActivity : FlutterActivity() {
                             check(!file.exists() || file.delete())
                             result.success(null)
                         }
+                        "loadNeutral" -> result.success(data().getBoolean("neutral", false).toString())
+                        "saveNeutral" -> {
+                            check(data().edit().putBoolean("neutral", id == "true").commit())
+                            result.success(null)
+                        }
                         "load" -> result.success(data().getString("document", null))
                         "save" -> {
                             check(data().edit().putString("document", checkNotNull(id)).commit())

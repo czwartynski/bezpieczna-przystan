@@ -5,6 +5,13 @@
   let starting = false;
   let playing = null;
   let data = null;
+  let neutral = false;
+  try {
+    neutral = sessionStorage.getItem('calculator-view') === 'true';
+  } catch (_) {
+    // The calculator still works when the browser disables session storage.
+  }
+  document.title = neutral ? 'Kalkulator' : 'Bezpieczna Przystań';
 
   const release = (stream) => stream.getTracks().forEach(track => track.stop());
   function pause() {
@@ -97,6 +104,17 @@
         started: capture?.created ?? null,
         playing,
       });
+    },
+    loadNeutral: () => String(neutral),
+    saveNeutral(value) {
+      neutral = value === 'true';
+      document.title = neutral ? 'Kalkulator' : 'Bezpieczna Przystań';
+      try {
+        if (neutral) sessionStorage.setItem('calculator-view', 'true');
+        else sessionStorage.removeItem('calculator-view');
+      } catch (_) {
+        // Keep the current view in memory when storage is unavailable.
+      }
     },
     load: () => data,
     save: value => { data = value; },

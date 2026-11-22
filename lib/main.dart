@@ -7,10 +7,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import 'audio.dart';
+import 'neutral_calculator.dart';
 
 void main() => runApp(
   MaterialApp(
-    title: 'Bezpieczna Przystań',
     debugShowCheckedModeBanner: false,
     locale: const Locale('pl'),
     supportedLocales: const [Locale('pl')],
@@ -86,7 +86,9 @@ class Przystan extends StatefulWidget {
 
 class _PrzystanState extends State<Przystan> {
   final _audio = Audio();
-  final _neutral = TextEditingController();
+  bool? _neutralActive;
+  bool _neutralDialogOpen = false;
+  int _returnPage = -1;
   String _legacyPlan = '';
   Map<String, String> _planAnswers = {};
   Set<String> _completedSteps = {};
@@ -105,6 +107,7 @@ class _PrzystanState extends State<Przystan> {
   @override
   void initState() {
     super.initState();
+    _loadNeutral();
     _load();
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _refresh());
@@ -113,8 +116,68 @@ class _PrzystanState extends State<Przystan> {
   @override
   void dispose() {
     _timer.cancel();
-    _neutral.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadNeutral() async {
+    try {
+      final active = await _audio.loadNeutral();
+      if (mounted) setState(() => _neutralActive = active);
+    } catch (_) {
+      if (mounted) setState(() => _neutralActive = true);
+    }
+  }
+
+  Future<void> _switchNeutral({required bool active}) async {
+    if (_busy || _neutralDialogOpen) return;
+    _neutralDialogOpen = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(active ? 'Otworzyć kalkulator?' : 'Zamknąć kalkulator?'),
+          content: active
+              ? const Text(
+                  'Aby wrócić, przytrzymaj wyświetlacz kalkulatora i potwierdź. '
+                  'Na komputerze działa też Ctrl + Shift + U.',
+                )
+              : null,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Anuluj'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(active ? 'Otwórz kalkulator' : 'Zamknij kalkulator'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      await _run(() async {
+        if (active) {
+          final status = await _audio.status();
+          if (status.started != null) {
+            _show('Zatrzymaj nagrywanie przed otwarciem kalkulatora.');
+            return;
+          }
+          if (status.playing != null) await _audio.pause();
+        }
+        await _audio.saveNeutral(active);
+        if (!mounted) return;
+        setState(() {
+          if (active) {
+            _returnPage = _page;
+          } else {
+            _page = _returnPage;
+          }
+          _neutralActive = active;
+        });
+      }, refresh: false);
+    } finally {
+      _neutralDialogOpen = false;
+    }
   }
 
   Future<void> _load() async {
@@ -169,7 +232,10 @@ class _PrzystanState extends State<Przystan> {
     }
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(
+    Future<void> Function() action, {
+    bool refresh = true,
+  }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -177,7 +243,7 @@ class _PrzystanState extends State<Przystan> {
     });
     try {
       await action();
-      await _refresh(force: true);
+      if (refresh) await _refresh(force: true);
     } catch (error) {
       final message = switch (error) {
         PlatformException(:final message) =>
@@ -427,11 +493,17 @@ class _PrzystanState extends State<Przystan> {
       await _run(() => _audio.delete(recording.id));
   }
 
-  void _go(int page) => setState(() {
-    if (page == 3) _usingPlan = true;
-    _page = page;
-    _error = null;
-  });
+  void _go(int page) {
+    if (page == 8) {
+      _switchNeutral(active: true);
+      return;
+    }
+    setState(() {
+      if (page == 3) _usingPlan = true;
+      _page = page;
+      _error = null;
+    });
+  }
 
   String _date(DateTime date) {
     final locale = MaterialLocalizations.of(context);
@@ -678,17 +750,6 @@ class _PrzystanState extends State<Przystan> {
         'Ośrodek interwencji kryzysowej lub ośrodek pomocy społecznej może pomóc Ci ustalić dostępne formy wsparcia.',
       ),
     ],
-    8 => [
-      TextField(
-        controller: _neutral,
-        minLines: 6,
-        maxLines: 16,
-        decoration: const InputDecoration(
-          labelText: 'Notatka robocza',
-          border: OutlineInputBorder(),
-        ),
-      ),
-    ],
     10 => [
       _card('PIN', 'Moduł w trakcie budowy.'),
       _card(
@@ -723,66 +784,73 @@ class _PrzystanState extends State<Przystan> {
   );
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: _page == -2,
-    onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) _go(_page >= 0 ? -1 : -2);
-    },
-    child: Scaffold(
-      appBar: _page == -2
-          ? null
-          : AppBar(
-              title: Text(
-                _page == -1
-                    ? 'Bezpieczna Przystań'
-                    : _page == 8
-                    ? 'Notatnik'
-                    : _modules[_page].$1,
+  Widget build(BuildContext context) {
+    if (_neutralActive == null) return const Scaffold();
+    if (_neutralActive!) {
+      return NeutralCalculator(
+        onUnlock: () => _switchNeutral(active: false),
+        error: _error == null ? null : 'Nie udało się zamknąć kalkulatora.',
+      );
+    }
+    return PopScope(
+      canPop: _page == -2,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _go(_page >= 0 ? -1 : -2);
+      },
+      child: Scaffold(
+        appBar: _page == -2
+            ? null
+            : AppBar(
+                title: Text(
+                  _page == -1 ? 'Bezpieczna Przystań' : _modules[_page].$1,
+                ),
+                leading: BackButton(
+                  onPressed: () => _go(_page == -1 ? -2 : -1),
+                ),
               ),
-              leading: BackButton(onPressed: () => _go(_page == -1 ? -2 : -1)),
-            ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920),
-            child: LayoutBuilder(
-              builder: (context, box) => ListView(
-                key: ValueKey(_page),
-                padding: const EdgeInsets.all(20),
-                children: [
-                  if (kIsWeb && _page != 8)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 16),
-                      child: Text(
-                        'Demo w przeglądarce · Używaj wyłącznie danych testowych.',
-                      ),
-                    ),
-                  if (_started != null && _page != 4)
-                    ListTile(
-                      leading: const Icon(Icons.mic),
-                      title: const Text('Trwa nagrywanie'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _go(4),
-                    ),
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 920),
+              child: LayoutBuilder(
+                builder: (context, box) => ListView(
+                  key: ValueKey(_page),
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    if (kIsWeb)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: Text(
+                          'Demo w przeglądarce · Używaj wyłącznie danych testowych.',
                         ),
                       ),
-                    ),
-                  ..._content(math.max(0, box.maxWidth - 40)),
-                ],
+                    if (_started != null && _page != 4)
+                      ListTile(
+                        leading: const Icon(Icons.mic),
+                        title: const Text('Trwa nagrywanie'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _go(4),
+                      ),
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ..._content(math.max(0, box.maxWidth - 40)),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _Lotus extends CustomPainter {

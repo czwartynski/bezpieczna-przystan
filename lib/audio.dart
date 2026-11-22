@@ -23,6 +23,10 @@ class Audio {
   Future<void> play(String id) async => platform.call('play', id);
   Future<void> pause() async => platform.call('pause');
   Future<void> delete(String id) async => platform.call('delete', id);
+  Future<bool> loadNeutral() async =>
+      await platform.call('loadNeutral') == 'true';
+  Future<void> saveNeutral(bool active) async =>
+      platform.call('saveNeutral', active.toString());
   Future<String?> load() => platform.call('load');
   Future<void> save(String data) async => platform.call('save', data);
 

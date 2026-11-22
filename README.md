@@ -1,6 +1,6 @@
 # Bezpieczna Przystań
 
-Pierwsza wersja aplikacji Flutter na Androida i do przeglądarki dla osób doświadczających przemocy. Zawiera dziennik z załącznikami audio, plan bezpieczeństwa, rejestrator, materiały edukacyjne i informacje o pomocy w Polsce. PANIC, SOS, rozmowy ze wsparciem, zmiana ikony i PIN są w przygotowaniu. Tryb neutralny otwiera prosty notatnik roboczy.
+Pierwsza wersja aplikacji Flutter na Androida i do przeglądarki dla osób doświadczających przemocy. Zawiera dziennik z załącznikami audio, plan bezpieczeństwa, rejestrator, materiały edukacyjne i informacje o pomocy w Polsce. PANIC, SOS, rozmowy ze wsparciem, zmiana ikony i PIN są w przygotowaniu. Tryb neutralny otwiera działający kalkulator. Przytrzymanie wyświetlacza lub skrót Ctrl + Shift + U otwiera okno potwierdzenia powrotu. Android zapamiętuje wybór lokalnie, a przeglądarka po odświeżeniu tej samej karty. Gest nie jest blokadą PIN, a nazwa i ikona aplikacji w systemie są nadal widoczne.
 
 ## Uruchomienie na Macu
 
