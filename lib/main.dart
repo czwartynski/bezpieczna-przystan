@@ -90,7 +90,7 @@ class _PrzystanState extends State<Przystan> {
   String _legacyPlan = '';
   Map<String, String> _planAnswers = {};
   Set<String> _completedSteps = {};
-  bool _usingPlan = false;
+  bool _usingPlan = true;
   List<Map<String, dynamic>> _entries = [];
   List<Recording> _recordings = [];
   int? _started;
@@ -282,8 +282,8 @@ class _PrzystanState extends State<Przystan> {
         alignment: Alignment.centerLeft,
         child: SegmentedButton<bool>(
           segments: const [
-            ButtonSegment(value: false, label: Text('Przygotuj plan')),
             ButtonSegment(value: true, label: Text('Otwórz plan')),
+            ButtonSegment(value: false, label: Text('Przygotuj plan')),
           ],
           selected: {_usingPlan},
           onSelectionChanged: ready
@@ -330,7 +330,7 @@ class _PrzystanState extends State<Przystan> {
       ] else ...[
         if (_planAnswers.isEmpty)
           const Text(
-            'Uzupełnij przynajmniej jeden krok, aby dodać go do checklisty.',
+            'Wybierz „Przygotuj plan” i zapisz pierwszy krok, aby pojawił się tutaj.',
           ),
         if (_planAnswers.isNotEmpty)
           Text('Wykonano ${_completedSteps.length} z ${_planAnswers.length}'),
@@ -428,6 +428,7 @@ class _PrzystanState extends State<Przystan> {
   }
 
   void _go(int page) => setState(() {
+    if (page == 3) _usingPlan = true;
     _page = page;
     _error = null;
   });
