@@ -93,6 +93,9 @@ class Przystan extends StatefulWidget {
 
 class _PrzystanState extends State<Przystan> {
   final _audio = Audio();
+  bool _doubleTapReturn = false;
+  String _returnKey = 'U';
+  String _micAction = 'none';
   bool? _neutralActive;
   bool _neutralDialogOpen = false;
   int _returnPage = -1;
@@ -137,8 +140,42 @@ class _PrzystanState extends State<Przystan> {
     }
   }
 
+  String get _returnInstructions =>
+      '${_doubleTapReturn ? 'Dotknij dwa razy pola wyniku' : 'Przytrzymaj pole wyniku'}'
+      ' lub użyj Ctrl + Shift + $_returnKey.';
+
+  void _setNeutralView(bool active, {int? destination}) {
+    if (!mounted) return;
+    _windowTitle.value = active ? 'Kalkulator' : 'Bezpieczna Przystań';
+    setState(() {
+      if (active) {
+        _returnPage = _page;
+      } else {
+        _page = destination ?? _returnPage;
+      }
+      _neutralActive = active;
+    });
+  }
+
+  Future<void> _panic() => _run(() async {
+    _setNeutralView(true);
+    try {
+      await _audio.saveNeutral(true);
+    } finally {
+      final status = await _audio.status();
+      if (status.started != null) await _audio.stop();
+      if (status.playing != null) await _audio.pause();
+    }
+  });
+
+  Future<void> _openRecorderFromCalculator() => _run(() async {
+    await _audio.saveNeutral(false);
+    _setNeutralView(false, destination: 4);
+  });
+
   Future<void> _switchNeutral({required bool active}) async {
     if (_busy || _neutralDialogOpen) return;
+    final neutralError = _error;
     _neutralDialogOpen = true;
     try {
       final confirmed = await showDialog<bool>(
@@ -146,9 +183,8 @@ class _PrzystanState extends State<Przystan> {
         builder: (context) => AlertDialog(
           title: Text(active ? 'Otworzyć kalkulator?' : 'Zamknąć kalkulator?'),
           content: active
-              ? const Text(
-                  'Aby wrócić, przytrzymaj wyświetlacz kalkulatora i potwierdź. '
-                  'Na komputerze działa też Ctrl + Shift + U.',
+              ? Text(
+                  'Aby wrócić, użyj skrótu i potwierdź. $_returnInstructions',
                 )
               : null,
           actions: [
@@ -175,15 +211,8 @@ class _PrzystanState extends State<Przystan> {
         }
         await _audio.saveNeutral(active);
         if (!mounted) return;
-        _windowTitle.value = active ? 'Kalkulator' : 'Bezpieczna Przystań';
-        setState(() {
-          if (active) {
-            _returnPage = _page;
-          } else {
-            _page = _returnPage;
-          }
-          _neutralActive = active;
-        });
+        _setNeutralView(active);
+        if (!active && mounted) setState(() => _error = neutralError);
       }, refresh: false);
     } finally {
       _neutralDialogOpen = false;
@@ -198,6 +227,13 @@ class _PrzystanState extends State<Przystan> {
         final saved = jsonDecode(raw) as Map<String, dynamic>;
         _entries = (saved['entries'] as List).cast<Map<String, dynamic>>();
         _legacyPlan = saved['plan'] as String? ?? '';
+        final shortcuts = saved['calculatorShortcuts'] as Map<String, dynamic>?;
+        _doubleTapReturn = shortcuts?['doubleTap'] == true;
+        final key = shortcuts?['key'];
+        if (key is String && RegExp(r'^[A-Z]$').hasMatch(key)) _returnKey = key;
+        final microphone = shortcuts?['microphone'];
+        if (microphone == 'open' || microphone == 'record')
+          _micAction = microphone as String;
         final answers =
             (saved['planAnswers'] as Map?)?.cast<String, String>() ?? {};
         _planAnswers = {
@@ -270,9 +306,15 @@ class _PrzystanState extends State<Przystan> {
     List<Map<String, dynamic>>? entries,
     Map<String, String>? answers,
     Set<String>? completed,
+    ({bool doubleTap, String key, String microphone})? shortcuts,
   }) async {
     await _audio.save(
       jsonEncode({
+        'calculatorShortcuts': {
+          'doubleTap': shortcuts?.doubleTap ?? _doubleTapReturn,
+          'key': shortcuts?.key ?? _returnKey,
+          'microphone': shortcuts?.microphone ?? _micAction,
+        },
         'entries': entries ?? _entries,
         'plan': _legacyPlan,
         'planAnswers': answers ?? _planAnswers,
@@ -281,6 +323,9 @@ class _PrzystanState extends State<Przystan> {
     );
     if (!mounted) return;
     setState(() {
+      _doubleTapReturn = shortcuts?.doubleTap ?? _doubleTapReturn;
+      _returnKey = shortcuts?.key ?? _returnKey;
+      _micAction = shortcuts?.microphone ?? _micAction;
       _entries = entries ?? _entries;
       _planAnswers = answers ?? _planAnswers;
       _completedSteps = completed ?? _completedSteps;
@@ -503,7 +548,126 @@ class _PrzystanState extends State<Przystan> {
       await _run(() => _audio.delete(recording.id));
   }
 
+  Future<void> _editShortcuts() async {
+    if (!_loaded || _busy) return;
+    var doubleTap = _doubleTapReturn;
+    var key = _returnKey;
+    var microphone = _micAction;
+    final settings = await showDialog<({bool doubleTap, String key, String microphone})>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Skróty kalkulatora'),
+          scrollable: true,
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: doubleTap,
+                  title: const Text('Powrót po podwójnym dotknięciu wyniku'),
+                  subtitle: const Text(
+                    'Po wyłączeniu przytrzymaj pole wyniku.',
+                  ),
+                  onChanged: (enabled) => update(() => doubleTap = enabled),
+                ),
+                const Text('Skrót powrotu na komputerze'),
+                DropdownButton<String>(
+                  isExpanded: true,
+                  value: key,
+                  items: [
+                    for (final letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
+                      DropdownMenuItem(
+                        value: letter,
+                        child: Text('Ctrl + Shift + $letter'),
+                      ),
+                  ],
+                  onChanged: (value) => update(() => key = value!),
+                ),
+                const Text('Przycisk mikrofonu w kalkulatorze'),
+                DropdownButton<String>(
+                  isExpanded: true,
+                  value: microphone,
+                  items: const [
+                    DropdownMenuItem(value: 'none', child: Text('Wyłączony')),
+                    DropdownMenuItem(
+                      value: 'open',
+                      child: Text('Otwórz rejestrator'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'record',
+                      child: Text('Nagraj / Zatrzymaj'),
+                    ),
+                  ],
+                  onChanged: (value) => update(() => microphone = value!),
+                ),
+                const Text(
+                  'Nagrywanie bez dźwięku i wibracji aplikacji. Wskaźnik mikrofonu pozostaje widoczny.',
+                ),
+                TextButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Podgląd skrótów'),
+                      content: Text(
+                        'Powrót: ${doubleTap ? 'dwukrotne dotknięcie wyniku' : 'przytrzymanie wyniku'} '
+                        'lub Ctrl + Shift + $key. '
+                        '${switch (microphone) {
+                          'open' => 'Mikrofon otworzy rejestrator.',
+                          'record' => 'Przycisk Nagraj uruchomi nagrywanie po wybraniu go w kalkulatorze.',
+                          _ => 'Przycisk mikrofonu jest wyłączony.',
+                        }}',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Zamknij'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  child: const Text('Testuj ustawienia'),
+                ),
+                TextButton(
+                  onPressed: () => update(() {
+                    doubleTap = false;
+                    key = 'U';
+                    microphone = 'none';
+                  }),
+                  child: const Text('Przywróć domyślne'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Anuluj'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, (
+                doubleTap: doubleTap,
+                key: key,
+                microphone: microphone,
+              )),
+              child: const Text('Zapisz'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (settings != null && mounted)
+      await _run(() => _save(shortcuts: settings));
+  }
+
   void _go(int page) {
+    if (page == 6) {
+      _panic();
+      return;
+    }
     if (page == 8) {
       _switchNeutral(active: true);
       return;
@@ -603,7 +767,7 @@ class _PrzystanState extends State<Przystan> {
                 ),
                 leading: Icon(_modules[i].$2),
                 title: Text(_modules[i].$1),
-                subtitle: [0, 6, 7, 9].contains(i)
+                subtitle: [0, 7, 9].contains(i)
                     ? const Text('Moduł w trakcie budowy')
                     : null,
                 trailing: const Icon(Icons.chevron_right),
@@ -761,6 +925,13 @@ class _PrzystanState extends State<Przystan> {
       ),
     ],
     10 => [
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.calculate_outlined),
+          title: const Text('Skróty kalkulatora'),
+          onTap: _loaded && !_busy ? _editShortcuts : null,
+        ),
+      ),
       _card('PIN', 'Moduł w trakcie budowy.'),
       _card(
         'Przechowywanie danych',
@@ -799,7 +970,30 @@ class _PrzystanState extends State<Przystan> {
     if (_neutralActive!) {
       return NeutralCalculator(
         onUnlock: () => _switchNeutral(active: false),
-        error: _error == null ? null : 'Nie udało się zamknąć kalkulatora.',
+        doubleTapReturn: _doubleTapReturn,
+        returnKey: _returnKey,
+        microphoneLabel: _started != null
+            ? 'Zatrzymaj • ${_time(Duration(milliseconds: DateTime.now().millisecondsSinceEpoch - _started!))}'
+            : switch (_micAction) {
+                'record' => 'Nagraj',
+                'open' => 'Otwórz rejestrator',
+                _ => null,
+              },
+        recording: _started != null,
+        onMicrophone: _busy
+            ? null
+            : () {
+                if (_started != null) {
+                  _run(_audio.stop);
+                } else if (_micAction == 'open') {
+                  _openRecorderFromCalculator();
+                } else if (_micAction == 'record') {
+                  _run(_audio.start);
+                }
+              },
+        error: _error == null
+            ? null
+            : 'Operacja się nie powiodła. Szczegóły są w panelu aplikacji.',
       );
     }
     return PopScope(
@@ -814,6 +1008,12 @@ class _PrzystanState extends State<Przystan> {
                 title: Text(
                   _page == -1 ? 'Bezpieczna Przystań' : _modules[_page].$1,
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: _busy ? null : _panic,
+                    child: const Text('PANIC'),
+                  ),
+                ],
                 leading: BackButton(
                   onPressed: () => _go(_page == -1 ? -2 : -1),
                 ),

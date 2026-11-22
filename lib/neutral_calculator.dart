@@ -2,9 +2,23 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 class NeutralCalculator extends StatefulWidget {
-  const NeutralCalculator({super.key, required this.onUnlock, this.error});
+  const NeutralCalculator({
+    super.key,
+    required this.onUnlock,
+    required this.doubleTapReturn,
+    required this.returnKey,
+    required this.recording,
+    this.microphoneLabel,
+    this.onMicrophone,
+    this.error,
+  });
 
   final VoidCallback onUnlock;
+  final bool doubleTapReturn;
+  final String returnKey;
+  final bool recording;
+  final String? microphoneLabel;
+  final VoidCallback? onMicrophone;
   final String? error;
 
   @override
@@ -119,7 +133,7 @@ class _NeutralCalculatorState extends State<NeutralCalculator> {
     final keyboard = HardwareKeyboard.instance;
     if (keyboard.isControlPressed &&
         keyboard.isShiftPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyU) {
+        event.logicalKey.keyLabel.toUpperCase() == widget.returnKey) {
       widget.onUnlock();
       return KeyEventResult.handled;
     }
@@ -171,7 +185,12 @@ class _NeutralCalculatorState extends State<NeutralCalculator> {
                   const SizedBox(height: 18),
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onLongPress: widget.onUnlock,
+                    onLongPress: widget.doubleTapReturn
+                        ? null
+                        : widget.onUnlock,
+                    onDoubleTap: widget.doubleTapReturn
+                        ? widget.onUnlock
+                        : null,
                     child: Container(
                       height: 108,
                       width: double.infinity,
@@ -195,6 +214,15 @@ class _NeutralCalculatorState extends State<NeutralCalculator> {
                       ),
                     ),
                   ),
+                  if (widget.microphoneLabel != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: FilledButton.icon(
+                        onPressed: widget.onMicrophone,
+                        icon: Icon(widget.recording ? Icons.stop : Icons.mic),
+                        label: Text(widget.microphoneLabel!),
+                      ),
+                    ),
                   if (widget.error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),

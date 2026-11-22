@@ -6,8 +6,10 @@
   let playing = null;
   let data = null;
   let neutral = false;
+  let calculatorShortcuts = null;
   try {
     neutral = sessionStorage.getItem('calculator-view') === 'true';
+    calculatorShortcuts = JSON.parse(sessionStorage.getItem('calculator-shortcuts'));
   } catch (_) {
     // The calculator still works when the browser disables session storage.
   }
@@ -116,8 +118,19 @@
         // Keep the current view in memory when storage is unavailable.
       }
     },
-    load: () => data,
-    save: value => { data = value; },
+    load: () => data ?? (calculatorShortcuts
+      ? JSON.stringify({entries: [], plan: '', calculatorShortcuts}) : null),
+    save(value) {
+      data = value;
+      calculatorShortcuts = JSON.parse(value).calculatorShortcuts ?? null;
+      try {
+        if (calculatorShortcuts) {
+          sessionStorage.setItem('calculator-shortcuts', JSON.stringify(calculatorShortcuts));
+        }
+      } catch (_) {
+        // Keep the shortcuts in memory when storage is unavailable.
+      }
+    },
   };
 
   globalThis.przystanAudio = async (method, argument) => {
