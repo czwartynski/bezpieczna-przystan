@@ -9,24 +9,31 @@ import 'package:flutter/services.dart';
 import 'audio.dart';
 import 'neutral_calculator.dart';
 
+final _windowTitle = ValueNotifier('Kalkulator');
+
 void main() => runApp(
-  MaterialApp(
-    debugShowCheckedModeBanner: false,
-    locale: const Locale('pl'),
-    supportedLocales: const [Locale('pl')],
-    localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff7148a3)),
-      scaffoldBackgroundColor: const Color(0xfffaf6ff),
-      cardTheme: const CardThemeData(
-        elevation: 0,
-        color: Color(0xfff1e8fc),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(22)),
+  ValueListenableBuilder<String>(
+    valueListenable: _windowTitle,
+    builder: (context, title, child) => MaterialApp(
+      title: title,
+      debugShowCheckedModeBanner: false,
+      locale: const Locale('pl'),
+      supportedLocales: const [Locale('pl')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff7148a3)),
+        scaffoldBackgroundColor: const Color(0xfffaf6ff),
+        cardTheme: const CardThemeData(
+          elevation: 0,
+          color: Color(0xfff1e8fc),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(22)),
+          ),
         ),
       ),
+      home: child,
     ),
-    home: const Przystan(),
+    child: const Przystan(),
   ),
 );
 
@@ -122,7 +129,9 @@ class _PrzystanState extends State<Przystan> {
   Future<void> _loadNeutral() async {
     try {
       final active = await _audio.loadNeutral();
-      if (mounted) setState(() => _neutralActive = active);
+      if (!mounted) return;
+      _windowTitle.value = active ? 'Kalkulator' : 'Bezpieczna Przystań';
+      setState(() => _neutralActive = active);
     } catch (_) {
       if (mounted) setState(() => _neutralActive = true);
     }
@@ -166,6 +175,7 @@ class _PrzystanState extends State<Przystan> {
         }
         await _audio.saveNeutral(active);
         if (!mounted) return;
+        _windowTitle.value = active ? 'Kalkulator' : 'Bezpieczna Przystań';
         setState(() {
           if (active) {
             _returnPage = _page;
